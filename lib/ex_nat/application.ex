@@ -3,10 +3,23 @@ defmodule ExNat.Application do
 
   use Application
 
+  alias ExNat.Listener
+
   @impl true
   def start(_type, _args) do
     children = [
-      {ExNat.Worker, [interface: "enp0s3", transport: :tcp]}
+      Listener.child_spec(
+        interface: "enp0s3",
+        transport: :udp,
+        from_ip: {172, 19, 0, 15},
+        from_port: 45892
+      ),
+      Listener.child_spec(
+        interface: "docker0",
+        transport: :udp,
+        from_ip: {172, 19, 0, 2},
+        from_port: 5671
+      )
     ]
 
     opts = [strategy: :one_for_one, name: ExNat.Supervisor]

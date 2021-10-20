@@ -3,6 +3,8 @@ defmodule ExNat.NatInfo do
     :from_ip,
     :from_port,
     :to_ip,
-    :to_port
+    :to_port,
+    :transport,
+    :packet
   ]
 end
