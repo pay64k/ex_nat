@@ -8,13 +8,16 @@ defmodule ExNat.Listener do
 
   def child_spec(opts) do
     interface = Keyword.fetch!(opts, :interface)
+    transport = Keyword.fetch!(opts, :transport)
     from_ip = Keyword.fetch!(opts, :from_ip)
     from_port = Keyword.fetch!(opts, :from_port)
-    transport = Keyword.fetch!(opts, :transport)
+    to_ip = Keyword.fetch!(opts, :to_ip)
+    to_port = Keyword.fetch!(opts, :to_port)
 
     %{
-      id: module_name(interface, transport, from_ip, from_port),
-      start: {__MODULE__, :start_link, [[interface, transport, from_ip, from_port]]}
+      id: module_name(interface, transport, from_ip, from_port, to_ip, to_port),
+      start:
+        {__MODULE__, :start_link, [[interface, transport, from_ip, from_port, to_ip, to_port]]}
     }
   end
 
@@ -22,13 +25,13 @@ defmodule ExNat.Listener do
   #   GenServer.cast
   # end
 
-  def start_link(opts = [interface, transport, from_ip, from_port]) do
+  def start_link(opts = [interface, transport, from_ip, from_port, to_ip, to_port]) do
     GenServer.start_link(__MODULE__, opts,
-      name: module_name(interface, transport, from_ip, from_port)
+      name: module_name(interface, transport, from_ip, from_port, to_ip, to_port)
     )
   end
 
-  def init([interface, transport, from_ip, from_port]) do
+  def init([interface, transport, from_ip, from_port, to_ip, to_port]) do
     {:ok, ref} = :epcap.start_link([{:inteface, interface}])
 
     {:ok,
@@ -38,7 +41,9 @@ defmodule ExNat.Listener do
        transport: transport,
        forwarder: nil,
        from_ip: from_ip,
-       from_port: from_port
+       from_port: from_port,
+       to_ip: to_ip,
+       to_port: to_port
      }}
   end
 
@@ -51,7 +56,13 @@ defmodule ExNat.Listener do
 
   def handle_info(
         {:packet, _dlt, _time, _length, bin_payload},
-        data = %{transport: transport, from_ip: from_ip, from_port: from_port}
+        data = %{
+          transport: transport,
+          from_ip: from_ip,
+          from_port: from_port,
+          to_ip: to_ip,
+          to_port: to_port
+        }
       ) do
     headers =
       bin_payload
@@ -69,12 +80,10 @@ defmodule ExNat.Listener do
             data_from_header(type, header, nat_info)
           end)
 
-        # |> Map.put(:interface, data.interface)
-        # |> IO.inspect
-
         if nat_info.from_ip == from_ip and nat_info.from_port == from_port do
           Map.put(nat_info, :packet, bin_payload)
           |> IO.inspect()
+          |> Forwarder.send(to_ip, to_port)
         end
 
         {:noreply, data}
@@ -108,23 +117,25 @@ defmodule ExNat.Listener do
     # https://github.com/msantos/pkt/blob/master/include/pkt_tcp.hrl
     {:tcp, from_port, to_port, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} = header
 
-    %{nat_info | from_port: from_port, to_port: to_port, transport: :udp}
+    %{nat_info | from_port: from_port, to_port: to_port, transport: :tcp}
   end
 
   defp data_from_header(:udp, header, nat_info) do
     # https://github.com/msantos/pkt/blob/master/include/pkt_udp.hrl
     {:udp, from_port, to_port, _, _} = header
 
-    %{nat_info | from_port: from_port, to_port: to_port, transport: :tcp}
+    %{nat_info | from_port: from_port, to_port: to_port, transport: :udp}
   end
 
-  defp module_name(interface, transport, from_ip, from_port) do
+  defp module_name(interface, transport, from_ip, from_port, to_ip, to_port) do
     Module.concat([
       __MODULE__,
       interface,
       "#{inspect(transport)}",
       "#{inspect(from_ip)}",
-      "#{inspect(from_port)}"
+      "#{inspect(from_port)}",
+      "#{inspect(to_ip)}",
+      "#{inspect(to_port)}"
     ])
   end
 end
